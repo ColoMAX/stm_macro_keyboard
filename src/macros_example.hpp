@@ -15,7 +15,8 @@ const char* maps[ROWS][COLS] = {{"1", "2\n", "3", "4"},
                                 {"7", "8", "9", "C"},
                                 {"*", "0", "#", "D"}};
 
-const char psk[] = "1234*";
+
+const char psk[] = "1234*"; // pincode
 
 const unsigned long PSKTIMEOUT = 10*1000*60; // ms:  10 min
 
