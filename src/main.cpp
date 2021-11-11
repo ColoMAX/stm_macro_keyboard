@@ -30,7 +30,6 @@
   mothod is that the pincode IS the key to the encryption of the macros.
   Optimization can be applyied on how the keys are being registerd.
 
-  ! THE MACROS FOR SHA & MAPLE CORE DO NOT WORK (YET)!
 */
 
 #include <Arduino.h>
@@ -39,10 +38,11 @@
 #include <Keypad.h>
 #include <stm32f1xx_hal_cortex.h>
 
-#include <macros_example.hpp>
+// not used yet
+//#include "mbedtls/config.h"
+//#include <mbedtls/blowfish.h>
 
-#include "mbedtls/config.h"
-#include <mbedtls/sha1.h>
+#include <macros_example.hpp>
 
 Keypad customKeypad =
     Keypad(makeKeymap(hexaKeys), rowPins, colPins, ROWS, COLS);
@@ -90,7 +90,6 @@ void loop() {
   blinker_handler(initialized);
   // led_driver();
 }
-
 
 /**
  * @brief Enable the flash read protection.
@@ -253,7 +252,6 @@ void keypadEvent(KeypadEvent key) {
   }
 }
 
-
 /**
  * @brief Handle initilized -macro mode green led functions.
  *
@@ -293,7 +291,7 @@ void green_led_handle(unsigned long* last_seen_minor) {
 
 /**
  * @brief Overall led controll.
- * 
+ *
  * @param initialized logged in flag
  */
 void blinker_handler(bool initialized) {
