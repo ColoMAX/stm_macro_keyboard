@@ -37,6 +37,7 @@
 #include <CircularBuffer.h>
 #include <Keypad.h>
 #include <stm32f1xx_hal_cortex.h>
+#include "mbedtls/config.h"
 
 #include <macros_example.hpp>
 
@@ -47,6 +48,8 @@
 uint8_t hash[sizeof(psk)];
 // char hash_r[256];
 #endif
+
+#include "mbedtls/sha1.h"
 
 #define MAPLE 0
 
@@ -62,20 +65,9 @@ USBCompositeSerial CompositeSerial;
 #define SerialUSB Serial
 #endif
 
-const char hexaKeys[ROWS][COLS] = {{'1', '2', '3', 'A'},
-                                   {'4', '5', '6', 'B'},
-                                   {'7', '8', '9', 'C'},
-                                   {'*', '0', '#', 'D'}};
-
-byte rowPins[ROWS] = {PA15, PB3, PB4, PB5};
-byte colPins[COLS] = {PB6, PB7, PB8, PB9};
 
 Keypad customKeypad =
     Keypad(makeKeymap(hexaKeys), rowPins, colPins, ROWS, COLS);
-
-const byte PIN_LED_BUILTIN = PC13;
-const byte PIN_ANODE_GREEN = PB11;
-const byte PIN_ANODE_RED = PB10;
 
 CircularBuffer<char, sizeof(psk) - 1> buffer;
 
@@ -83,6 +75,23 @@ volatile unsigned long lastSeen = 0;
 volatile bool initialized = false;
 volatile bool numlock_litteral = false;
 
+void enable_flash_read_protection() {
+  HAL_FLASH_Unlock();
+  HAL_FLASH_OB_Unlock();
+  FLASH_OBProgramInitTypeDef pOBInit_for_readprot;
+  HAL_FLASHEx_OBGetConfig(&pOBInit_for_readprot);
+   // no protection
+  if (pOBInit_for_readprot.RDPLevel == OB_RDP_LEVEL_0) { 
+    // enable protection
+    pOBInit_for_readprot.OptionType = OPTIONBYTE_RDP;
+    pOBInit_for_readprot.RDPLevel = OB_RDP_LEVEL_1;
+    HAL_FLASHEx_OBProgram(&pOBInit_for_readprot);
+    HAL_FLASH_OB_Launch();
+  }
+  HAL_FLASH_OB_Lock();
+  HAL_FLASH_Lock();
+  
+}
 enum led_on { none, red, green };
 
 void led_driver(led_on which) {
@@ -90,22 +99,22 @@ void led_driver(led_on which) {
     case red:
       // TODO change to direct port manipulation or
       //    to use the hal (CMSIS)
-      digitalWrite(PIN_ANODE_RED, HIGH);
-      digitalWrite(PIN_ANODE_GREEN, LOW);
+      BILED(digitalWrite(PIN_ANODE_RED, HIGH));
+      BILED(digitalWrite(PIN_ANODE_GREEN, LOW));
       digitalWrite(PIN_LED_BUILTIN, LOW);
       break;
     case green:
-      digitalWrite(PIN_ANODE_RED, LOW);
-      digitalWrite(PIN_ANODE_GREEN, HIGH);
+      BILED(digitalWrite(PIN_ANODE_RED, LOW));
+      BILED(digitalWrite(PIN_ANODE_GREEN, HIGH));
       digitalWrite(PIN_LED_BUILTIN, HIGH);
       break;
     case none:
-      digitalWrite(PIN_ANODE_RED, LOW);
-      digitalWrite(PIN_ANODE_GREEN, LOW);
+      BILED(digitalWrite(PIN_ANODE_RED, LOW));
+      BILED(digitalWrite(PIN_ANODE_GREEN, LOW));
       digitalWrite(PIN_LED_BUILTIN, HIGH);
       break;
     default:
-      // dont care
+      // dont care, should not be possible
       break;
   }
 }
@@ -151,7 +160,7 @@ void keypadEvent(KeypadEvent key) {
         // pincode mode
         buffer.push(key);
         if (buffer.isFull()) {
-          bool passwordCorrect = false;
+          bool passwordCorrect;
 #ifdef USE_HASH_HMAC
           passwordCorrect = buffer[buffer.size() - 1] == '*';
 #else
@@ -161,15 +170,14 @@ void keypadEvent(KeypadEvent key) {
           }
 #endif
           if (passwordCorrect) {
-            //led_driver(green);
+            // led_driver(green);
             initialized = true;
 #ifdef USE_HASH_HMAC
-
             Sha256.initHmac(hash,
-                            buffer.size());  // key, and length of key in bytes
+                            buffer.size());  
+                            // key, and length of key in bytes
             // Sha256.print("This is a message to hash");
 #else
-
 #endif
           }
         }
@@ -189,15 +197,19 @@ void keypadEvent(KeypadEvent key) {
           HAL_NVIC_SystemReset();
 #endif
           break;
-          case '*': // logout
-            initialized = false;
-            break;
+        case '*':  // logout
+          initialized = false;
+          break;
         default:
           break;
       }
   }
 }
+
 void setup() {
+  if (READ_PROTECTION)
+    enable_flash_read_protection();
+
   lastSeen = millis();
 #if MAPLE
   HID.begin(CompositeSerial, HID_KEYBOARD);
@@ -210,18 +222,16 @@ void setup() {
 #endif
   // TODO use CMSIS
   pinMode(PIN_LED_BUILTIN, OUTPUT);
-  pinMode(PIN_ANODE_RED, OUTPUT);
-  pinMode(PIN_ANODE_GREEN, OUTPUT);
-  //led_driver(red);
-  // ledPin_state = digitalRead(
-  //    PIN_LED_BUILTIN);  // Store initial LED state. HIGH when LED is on.
+  BILED(pinMode(PIN_ANODE_RED, OUTPUT));
+  BILED(pinMode(PIN_ANODE_GREEN, OUTPUT));
 
-  // customKeypad.begin()
-  customKeypad.setDebounceTime(10);
+  customKeypad.setDebounceTime(DEBOUCE_TIME);
   customKeypad.addEventListener(keypadEvent);
 }
 
 void blinker_uninitialized(bool initialized) {
+  // if bi_led is turned off, this part is doing a lot 
+  //    of non-relavent computation
   static unsigned long last_seen_minor = millis();
   static enum {
     first_blink,
@@ -231,7 +241,7 @@ void blinker_uninitialized(bool initialized) {
     second_blink_end,
     long_pause
   } state = long_pause;
-  if(initialized){
+  if (initialized) {
     led_driver(green);
     state = first_blink;
     return;
@@ -269,7 +279,7 @@ void blinker_uninitialized(bool initialized) {
       break;
     case long_pause:
       if ((millis() - last_seen_minor) >= BLINK_PERIOD) {
-        //led_driver(none);
+        // led_driver(none);
         state = first_blink;
         last_seen_minor = millis();
       }
@@ -281,12 +291,13 @@ void blinker_uninitialized(bool initialized) {
 }
 
 void loop() {
-  char customKey = customKeypad.getKey();  // needed for eventListener ;(
+  customKeypad.getKeys();  // needed for eventListener,  ;(
+  
   if (initialized && PSKTIMEOUT && (millis() - lastSeen) >= PSKTIMEOUT) {
     initialized = false;
     buffer.clear();
-    //led_driver(red);
+    // led_driver(red);
   }
-   
+
   blinker_uninitialized(initialized);
 }
