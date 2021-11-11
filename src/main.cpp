@@ -36,34 +36,15 @@
 #include <Arduino.h>
 #include <CircularBuffer.h>
 #include <Keypad.h>
+#include <Keyboard.h>
 #include <stm32f1xx_hal_cortex.h>
 #include "mbedtls/config.h"
+#include "mbedtls/sha1.h"
 
 #include <macros_example.hpp>
 
-//#include <hmac.h>
-//#include "sha256.h"
 
-#ifdef USE_HASH_HMAC
-uint8_t hash[sizeof(psk)];
-// char hash_r[256];
-#endif
 
-#include "mbedtls/sha1.h"
-
-#define MAPLE 0
-
-#if MAPLE
-#include <USBComposite.h>
-USBHID HID;
-HIDKeyboard Keyboard(HID);
-#define SerialUSB CompositeSerial
-USBCompositeSerial CompositeSerial;
-#else
-#include <Keyboard.h>
-#include <USBSerial.h>
-#define SerialUSB Serial
-#endif
 
 
 Keypad customKeypad =
@@ -141,13 +122,7 @@ void keypadEvent(KeypadEvent key) {
           for (int i = 0; i < ROWS; i++) {
             for (int j = 0; j < COLS; j++) {
               if (hexaKeys[i][j] == key) {
-#ifdef USE_HASH_HMAC
-                Sha256.print(maps[i][j]);
-                Keyboard.print((char*)Sha256.resultHmac());
-#else
                 Keyboard.print(maps[i][j]);
-#endif
-                SerialUSB.print("Key pressed\n");
                 break;
               }
             }
@@ -161,24 +136,13 @@ void keypadEvent(KeypadEvent key) {
         buffer.push(key);
         if (buffer.isFull()) {
           bool passwordCorrect;
-#ifdef USE_HASH_HMAC
-          passwordCorrect = buffer[buffer.size() - 1] == '*';
-#else
           for (int i = 0; i < buffer.size(); i++) {
             passwordCorrect = buffer[i] == psk[i];
             if (!passwordCorrect) break;
           }
-#endif
           if (passwordCorrect) {
             // led_driver(green);
             initialized = true;
-#ifdef USE_HASH_HMAC
-            Sha256.initHmac(hash,
-                            buffer.size());  
-                            // key, and length of key in bytes
-            // Sha256.print("This is a message to hash");
-#else
-#endif
           }
         }
       }
@@ -191,11 +155,7 @@ void keypadEvent(KeypadEvent key) {
           switched_mode = true;
           break;
         case 'D':  // reset and enter bootloader.
-#if MAPLE
-          nvic_sys_reset();
-#else
           HAL_NVIC_SystemReset();
-#endif
           break;
         case '*':  // logout
           initialized = false;
@@ -211,15 +171,8 @@ void setup() {
     enable_flash_read_protection();
 
   lastSeen = millis();
-#if MAPLE
-  HID.begin(CompositeSerial, HID_KEYBOARD);
-  while (!USBComposite)
-    ;
-  Keyboard.begin();  // needed for LED support
-#else
-  SerialUSB.begin(115200);
   Keyboard.begin();
-#endif
+
   // TODO use CMSIS
   pinMode(PIN_LED_BUILTIN, OUTPUT);
   BILED(pinMode(PIN_ANODE_RED, OUTPUT));
