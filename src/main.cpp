@@ -35,17 +35,14 @@
 
 #include <Arduino.h>
 #include <CircularBuffer.h>
-#include <Keypad.h>
 #include <Keyboard.h>
+#include <Keypad.h>
 #include <stm32f1xx_hal_cortex.h>
-#include "mbedtls/config.h"
-#include "mbedtls/sha1.h"
 
 #include <macros_example.hpp>
 
-
-
-
+#include "mbedtls/config.h"
+#include "mbedtls/sha1.h"
 
 Keypad customKeypad =
     Keypad(makeKeymap(hexaKeys), rowPins, colPins, ROWS, COLS);
@@ -61,8 +58,8 @@ void enable_flash_read_protection() {
   HAL_FLASH_OB_Unlock();
   FLASH_OBProgramInitTypeDef pOBInit_for_readprot;
   HAL_FLASHEx_OBGetConfig(&pOBInit_for_readprot);
-   // no protection
-  if (pOBInit_for_readprot.RDPLevel == OB_RDP_LEVEL_0) { 
+  // no protection
+  if (pOBInit_for_readprot.RDPLevel == OB_RDP_LEVEL_0) {
     // enable protection
     pOBInit_for_readprot.OptionType = OPTIONBYTE_RDP;
     pOBInit_for_readprot.RDPLevel = OB_RDP_LEVEL_1;
@@ -71,28 +68,47 @@ void enable_flash_read_protection() {
   }
   HAL_FLASH_OB_Lock();
   HAL_FLASH_Lock();
-  
 }
-enum led_on { none, red, green };
+enum led_on { repeat, none, red, green, orange };
 
-void led_driver(led_on which) {
+// when orange, call need to be at high frequency, there is no callback.
+void led_driver(led_on which = repeat) {
+  static led_on lastState = which;
+  static led_on lastColor = none;
+  if (which == repeat) {
+    which = lastState;
+  }
+
   switch (which) {
-    case red:
-      // TODO change to direct port manipulation or
-      //    to use the hal (CMSIS)
-      BILED(digitalWrite(PIN_ANODE_RED, HIGH));
-      BILED(digitalWrite(PIN_ANODE_GREEN, LOW));
-      digitalWrite(PIN_LED_BUILTIN, LOW);
-      break;
-    case green:
-      BILED(digitalWrite(PIN_ANODE_RED, LOW));
-      BILED(digitalWrite(PIN_ANODE_GREEN, HIGH));
-      digitalWrite(PIN_LED_BUILTIN, HIGH);
-      break;
+  red_driver:
+  case red:
+    // TODO change to direct port manipulation or
+    //    to use the hal (CMSIS)
+    BILED(digitalWrite(PIN_ANODE_RED, HIGH));
+    BILED(digitalWrite(PIN_ANODE_GREEN, LOW));
+    digitalWrite(PIN_LED_BUILTIN, LOW);
+    lastColor = red;
+    break;
+  green_driver:
+  case green:
+    BILED(digitalWrite(PIN_ANODE_RED, LOW));
+    BILED(digitalWrite(PIN_ANODE_GREEN, HIGH));
+    digitalWrite(PIN_LED_BUILTIN, HIGH);
+    lastColor = green;
+    break;
     case none:
       BILED(digitalWrite(PIN_ANODE_RED, LOW));
       BILED(digitalWrite(PIN_ANODE_GREEN, LOW));
       digitalWrite(PIN_LED_BUILTIN, HIGH);
+      lastColor = none;
+      break;
+    case orange:
+      if (lastColor == green) {
+        goto red_driver;
+      } else {
+        goto green_driver;
+      }
+
       break;
     default:
       // dont care, should not be possible
@@ -100,6 +116,31 @@ void led_driver(led_on which) {
   }
 }
 
+void print_macro(KeypadEvent key) {
+  for (int i = 0; i < ROWS; i++) {
+    for (int j = 0; j < COLS; j++) {
+      if (hexaKeys[i][j] == key) {
+        Keyboard.print(maps[i][j]);
+        break;
+      }
+    }
+  }
+}
+
+void psk_handle(KeypadEvent key) {
+  buffer.push(key);
+  if (buffer.isFull()) {
+    bool passwordCorrect;
+    for (int i = 0; i < buffer.size(); i++) {
+      passwordCorrect = buffer[i] == psk[i];
+      if (!passwordCorrect) break;
+    }
+    if (passwordCorrect) {
+      led_driver(green);
+      initialized = true;
+    }
+  }
+}
 // Taking care of some special events.
 void keypadEvent(KeypadEvent key) {
   // TODO clean by use of fsm
@@ -119,40 +160,29 @@ void keypadEvent(KeypadEvent key) {
         }
         // macro mode
         if (!numlock_litteral) {
-          for (int i = 0; i < ROWS; i++) {
-            for (int j = 0; j < COLS; j++) {
-              if (hexaKeys[i][j] == key) {
-                Keyboard.print(maps[i][j]);
-                break;
-              }
-            }
-          }
+          print_macro(key);
         } else {
           // numpad mode.
           Keyboard.write(key);
         }
       } else {
         // pincode mode
-        buffer.push(key);
-        if (buffer.isFull()) {
-          bool passwordCorrect;
-          for (int i = 0; i < buffer.size(); i++) {
-            passwordCorrect = buffer[i] == psk[i];
-            if (!passwordCorrect) break;
-          }
-          if (passwordCorrect) {
-            // led_driver(green);
-            initialized = true;
-          }
-        }
+        psk_handle(key);
       }
       break;
 
     case HOLD:
       switch (key) {
         case '#':  // switch between numpad and macro mode
-          numlock_litteral = !numlock_litteral;
-          switched_mode = true;
+          if (initialized) {
+            numlock_litteral = !numlock_litteral;
+            switched_mode = true;
+            // if(numlock_litteral){
+            //   led_driver(orange);
+            // }else{
+            //   led_driver(green);
+            // }
+          }
           break;
         case 'D':  // reset and enter bootloader.
           HAL_NVIC_SystemReset();
@@ -167,13 +197,11 @@ void keypadEvent(KeypadEvent key) {
 }
 
 void setup() {
-  if (READ_PROTECTION)
-    enable_flash_read_protection();
+  if (READ_PROTECTION) enable_flash_read_protection();
 
   lastSeen = millis();
   Keyboard.begin();
 
-  // TODO use CMSIS
   pinMode(PIN_LED_BUILTIN, OUTPUT);
   BILED(pinMode(PIN_ANODE_RED, OUTPUT));
   BILED(pinMode(PIN_ANODE_GREEN, OUTPUT));
@@ -182,8 +210,39 @@ void setup() {
   customKeypad.addEventListener(keypadEvent);
 }
 
-void blinker_uninitialized(bool initialized) {
-  // if bi_led is turned off, this part is doing a lot 
+enum green_blink_state { green_start_blink, green_end_blink, green_stable };
+
+void green_led_handle(unsigned long* last_seen_minor) {
+  static green_blink_state gstate = green_start_blink;
+  if (PSKTIMEOUT && (millis() - lastSeen) >= PSKTIMEOUT_WARNING) {
+    switch (gstate) {
+      case green_start_blink:
+        led_driver(none);
+        if ((millis() - *last_seen_minor) >= 100) {
+          gstate = green_end_blink;
+          *last_seen_minor = millis();
+        }
+        break;
+      case green_end_blink:
+        led_driver(green);
+        gstate = green_stable;
+        break;
+      case green_stable:
+        if ((millis() - *last_seen_minor) >= 900) {
+          gstate = green_start_blink;
+          *last_seen_minor = millis();
+        }
+        break;
+      default:
+        break;
+    }
+    // last_seen_minor = millis();
+  } else {
+    led_driver(green);
+  }
+}
+void blinker_handler(bool initialized) {
+  // if bi_led option is turned off, this part is doing a lot
   //    of non-relavent computation
   static unsigned long last_seen_minor = millis();
   static enum {
@@ -195,7 +254,12 @@ void blinker_uninitialized(bool initialized) {
     long_pause
   } state = long_pause;
   if (initialized) {
-    led_driver(green);
+    if (numlock_litteral) {
+      led_driver(orange);
+    } else {
+      green_led_handle(&last_seen_minor);
+    }
+    // led_driver(green);
     state = first_blink;
     return;
   }
@@ -245,12 +309,13 @@ void blinker_uninitialized(bool initialized) {
 
 void loop() {
   customKeypad.getKeys();  // needed for eventListener,  ;(
-  
+
   if (initialized && PSKTIMEOUT && (millis() - lastSeen) >= PSKTIMEOUT) {
     initialized = false;
     buffer.clear();
     // led_driver(red);
   }
 
-  blinker_uninitialized(initialized);
+  blinker_handler(initialized);
+  // led_driver();
 }
