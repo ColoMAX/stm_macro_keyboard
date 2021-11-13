@@ -44,6 +44,15 @@
 
 #include <macros_example.hpp>
 
+#undef expr
+
+// experimental eeprom. 
+// does show weird behaviour, so disabled.
+#if expr
+#include "eewl.h"
+#endif
+
+
 Keypad customKeypad =
     Keypad(makeKeymap(hexaKeys), rowPins, colPins, ROWS, COLS);
 
@@ -52,9 +61,20 @@ CircularBuffer<char, sizeof(psk) - 1> buffer;
 volatile unsigned long lastSeen = 0;
 volatile bool initialized = false;
 volatile bool numlock_litteral = false;
+
 volatile int psk_false_count = 0;
 volatile int psk_false_count_last = 0;
+volatile bool disable_timeout = false;
 
+#if expr
+struct data_saved {
+  int count;
+  int count_last;
+} cs = {0,0};
+
+EEWL pC(cs, FLASH_PAGE_SIZE/sizeof(cs), 0);
+
+#endif
 enum led_on { repeat, none, red, green, orange };
 enum green_blink_state { green_start_blink, green_end_blink, green_stable };
 
@@ -64,11 +84,14 @@ void led_driver(led_on which = repeat);
 void print_macro(KeypadEvent key);
 void psk_handle(KeypadEvent key);
 void keypadEvent(KeypadEvent key);
-void green_led_handle(unsigned long* last_seen_minor);
+void logout_warning(unsigned long* last_seen_minor, led_on color);
 void blinker_handler(bool initialized);
 
 void setup() {
   if (READ_PROTECTION) enable_flash_read_protection();
+  #if expr
+  EEPROM.begin();
+  #endif
 
   lastSeen = millis();
   Keyboard.begin();
@@ -83,8 +106,9 @@ void setup() {
 
 void loop() {
   customKeypad.getKeys();  // needed for eventListener,  ;(
+  if (disable_timeout) lastSeen = millis();
 
-  if (initialized && PSKTIMEOUT && (millis() - lastSeen) >= PSKTIMEOUT) {
+  if (!disable_timeout && initialized && PSKTIMEOUT && (millis() - lastSeen) >= PSKTIMEOUT) {
     initialized = false;
     buffer.clear();
     // led_driver(red);
@@ -154,8 +178,6 @@ void led_driver(led_on which) {
   switch (which) {
   red_driver:
   case red:
-    // TODO change to direct port manipulation or
-    //    to use the hal (CMSIS)
     BILED(digitalWrite(PIN_ANODE_RED, HIGH));
     BILED(digitalWrite(PIN_ANODE_GREEN, LOW));
     digitalWrite(PIN_LED_BUILTIN, LOW);
@@ -221,8 +243,23 @@ void psk_handle(KeypadEvent key) {
     if (passwordCorrect) {
       led_driver(green);
       initialized = true;
+      psk_false_count_last = psk_false_count = 0;
+      #if expr
+      cs.count = psk_false_count;
+      pC.put(cs);
+      #endif
     } else {
-      if (++psk_false_count > 0 && psk_false_count % psk_lockout_max == 0) {
+      #if expr
+      pC.get(cs);
+      psk_false_count = cs.count;
+      #endif
+      
+      psk_false_count++;
+      #if expr
+      cs.count=psk_false_count;
+      pC.put(cs);
+      #endif
+      if (psk_false_count > 0 && psk_false_count % psk_lockout_max == 0) {
         if (psk_false_count % psk_wipe_count == 0) {
           system_wipe();
         } else {
@@ -280,8 +317,21 @@ void keypadEvent(KeypadEvent key) {
             switched_mode = true;
           }
           break;
-        case 'D':  // reset and enter bootloader.
+        case 'D':  
+          if(!initialized | !numlock_litteral){
+          // reset and enter bootloader.
           HAL_NVIC_SystemReset();
+          }else{
+            switched_mode = true;
+            disable_timeout = !disable_timeout;
+            led_on color = disable_timeout ? green : red;
+            unsigned long now = millis();
+            //block
+            while ((millis() -now)<500) {
+              yield();
+              led_driver(color);
+              }
+          }
           break;
         case '*':  // logout
           initialized = false;
@@ -297,12 +347,12 @@ void keypadEvent(KeypadEvent key) {
  *
  * @param last_seen_minor last led change time (ms)
  */
-void green_led_handle(unsigned long* last_seen_minor) {
+void logout_warning(unsigned long* last_seen_minor, led_on color) {
   static green_blink_state gstate = green_start_blink;
   // almost out of time?
-  if (PSKTIMEOUT && (millis() - lastSeen) < PSKTIMEOUT_WARNING) {
+  if (PSKTIMEOUT && (millis() - lastSeen) < PSKTIMEOUT_WARNING || disable_timeout) {
     // nah
-    led_driver(green);
+    led_driver(color);
   } else {
     // ALMOST OUT OF TIME!
     switch (gstate) {
@@ -314,10 +364,11 @@ void green_led_handle(unsigned long* last_seen_minor) {
         }
         break;
       case green_end_blink:  // make sure to wait for one period.
-        led_driver(green);
+        led_driver(color);
         gstate = green_stable;
         break;
       case green_stable:
+      led_driver(color);
         if ((millis() - *last_seen_minor) >= 900) {
           gstate = green_start_blink;
           *last_seen_minor = millis();
@@ -381,12 +432,8 @@ void blinker_handler(bool initialized) {
     long_pause
   } state = long_pause;
   if (initialized) {
-    if (numlock_litteral) {
-      led_driver(orange);
-    } else {
-      green_led_handle(&last_seen_minor);
-    }
-    // led_driver(green);
+
+      logout_warning(&last_seen_minor, numlock_litteral?orange:green );
     state = first_blink;
 
   } else {
