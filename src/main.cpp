@@ -52,11 +52,14 @@ CircularBuffer<char, sizeof(psk) - 1> buffer;
 volatile unsigned long lastSeen = 0;
 volatile bool initialized = false;
 volatile bool numlock_litteral = false;
+volatile int psk_false_count = 0;
+volatile int psk_false_count_last = 0;
 
 enum led_on { repeat, none, red, green, orange };
 enum green_blink_state { green_start_blink, green_end_blink, green_stable };
 
 void enable_flash_read_protection();
+void system_wipe();
 void led_driver(led_on which = repeat);
 void print_macro(KeypadEvent key);
 void psk_handle(KeypadEvent key);
@@ -111,6 +114,29 @@ void enable_flash_read_protection() {
   }
   HAL_FLASH_OB_Lock();
   HAL_FLASH_Lock();
+}
+
+__RAM_FUNC HAL_StatusTypeDef
+HAL_FLASHEx_Erase(FLASH_EraseInitTypeDef* pEraseInit, uint32_t* PageError);
+__RAM_FUNC HAL_StatusTypeDef HAL_FLASH_Lock();
+__RAM_FUNC void HAL_NVIC_SystemReset();
+
+__RAM_FUNC void system_wipe() {
+  HAL_FLASH_Unlock();
+
+  // wipe all except bootloader
+  uint32_t PageError;
+  FLASH_EraseInitTypeDef S_erase{
+      .TypeErase = FLASH_TYPEERASE_PAGES,
+      .Banks = FLASH_BANK_1,
+      .PageAddress = USER_PROGRAM_START,
+      // static_assert(IS_FLASH_NB_PAGES())
+      .NbPages = (FLASH_START_LAST_PAGE - USER_PROGRAM_START) /
+                 FLASH_PAGE_SIZE  // FIXME may be wrong
+  };
+  HAL_FLASHEx_Erase(&S_erase, &PageError);
+  HAL_FLASH_Lock();
+  HAL_NVIC_SystemReset();
 }
 
 /**
@@ -185,7 +211,8 @@ void print_macro(KeypadEvent key) {
  */
 void psk_handle(KeypadEvent key) {
   buffer.push(key);
-  if (buffer.isFull()) {
+  // only once "*" is pressed, the pincode is checked
+  if (buffer.isFull() && buffer.last() == psk_end_char) {
     bool passwordCorrect;
     for (int i = 0; i < buffer.size(); i++) {
       passwordCorrect = buffer[i] == psk[i];
@@ -194,6 +221,19 @@ void psk_handle(KeypadEvent key) {
     if (passwordCorrect) {
       led_driver(green);
       initialized = true;
+    } else {
+      if (++psk_false_count > 0 && psk_false_count % psk_lockout_max == 0) {
+        if (psk_false_count % psk_wipe_count == 0) {
+          system_wipe();
+        } else {
+          led_driver(red);
+          unsigned long last_time = millis();
+          // block for some time
+          while ((millis() - last_time < psk_lockout_time)) {
+            yield();
+          }
+        }
+      }
     }
   }
 }
@@ -289,6 +329,40 @@ void green_led_handle(unsigned long* last_seen_minor) {
   }
 }
 
+bool false_handle() {
+  static enum { first, start_orange, timeout } state = timeout;
+  bool active = true;
+  unsigned long current_time = millis();
+  static unsigned long last_seen_minor = current_time;
+
+  //led_driver(orange);
+  switch (state) {
+    case first:
+      last_seen_minor = current_time;
+      state = start_orange;
+      //led_driver(orange);
+      // active = true;
+      break;
+    case start_orange:
+      if ((current_time - last_seen_minor > 200)) {
+        last_seen_minor = current_time;
+        state = timeout;
+        psk_false_count_last = psk_false_count;
+      }
+      led_driver(orange);
+      // active = true;
+      break;
+    case timeout:
+      if (psk_false_count_last < psk_false_count) state = first;
+      active = false;
+      break;
+    default:
+      state = timeout;
+      break;
+  }
+  return active;
+}
+
 /**
  * @brief Overall led controll.
  *
@@ -314,48 +388,51 @@ void blinker_handler(bool initialized) {
     }
     // led_driver(green);
     state = first_blink;
-    return;
-  }
-  switch (state) {
-    case first_blink:
-      led_driver(red);
-      state = first_blink_end;
-      last_seen_minor = millis();
-      break;
-    case first_blink_end:
-      if ((millis() - last_seen_minor) >= 50) {
-        led_driver(none);
-        state = short_pause;
-        last_seen_minor = millis();
+
+  } else {
+    if (!false_handle()) {
+      switch (state) {
+        case first_blink:
+          led_driver(red);
+          state = first_blink_end;
+          last_seen_minor = millis();
+          break;
+        case first_blink_end:
+          if ((millis() - last_seen_minor) >= 50) {
+            led_driver(none);
+            state = short_pause;
+            last_seen_minor = millis();
+          }
+          break;
+        case short_pause:
+          if ((millis() - last_seen_minor) >= 100) {
+            state = second_blink;
+            last_seen_minor = millis();
+          }
+          break;
+        case second_blink:
+          led_driver(red);
+          state = second_blink_end;
+          last_seen_minor = millis();
+          break;
+        case second_blink_end:
+          if ((millis() - last_seen_minor) >= 50) {
+            led_driver(none);
+            state = long_pause;
+            last_seen_minor = millis();
+          }
+          break;
+        case long_pause:
+          if ((millis() - last_seen_minor) >= BLINK_PERIOD) {
+            // led_driver(none);
+            state = first_blink;
+            last_seen_minor = millis();
+          }
+          break;
+        default:
+          state = long_pause;
+          break;
       }
-      break;
-    case short_pause:
-      if ((millis() - last_seen_minor) >= 100) {
-        state = second_blink;
-        last_seen_minor = millis();
-      }
-      break;
-    case second_blink:
-      led_driver(red);
-      state = second_blink_end;
-      last_seen_minor = millis();
-      break;
-    case second_blink_end:
-      if ((millis() - last_seen_minor) >= 50) {
-        led_driver(none);
-        state = long_pause;
-        last_seen_minor = millis();
-      }
-      break;
-    case long_pause:
-      if ((millis() - last_seen_minor) >= BLINK_PERIOD) {
-        // led_driver(none);
-        state = first_blink;
-        last_seen_minor = millis();
-      }
-      break;
-    default:
-      state = long_pause;
-      break;
+    }
   }
 }

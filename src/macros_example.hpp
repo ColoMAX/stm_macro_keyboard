@@ -31,9 +31,13 @@ const char* maps[ROWS][COLS] = {{"1", "2\n", "3", "4"},
                                 {"7", "8", "9", "C"},
                                 {"*", "0", "#", "D"}};
 
-const char psk[] = "1234*";  // pincode
+#define psk_ "1234"                           // pincode
+#define end_psk *                             // apply password char
+const int psk_lockout_max = 5;                // number of tried before lockout
+const unsigned long psk_lockout_time = 3000;  // 3 * 3600;
+const int psk_wipe_count = 2;  // number of lockouts untill flash wipe.
 
-const unsigned long PSKTIMEOUT = 10 * 1000 * 60;  // ms:  10 min
+const unsigned long PSKTIMEOUT = 10 * 1000;  //* 60;  // ms:  10 min
 const unsigned long PSKTIMEOUT_WARNING = PSKTIMEOUT * 0.8;
 const unsigned long BLINK_PERIOD = 500;  // ms: 500 ms
 const uint DEBOUCE_TIME = 10;            // ms
@@ -46,6 +50,9 @@ const byte PIN_ANODE_RED = PB10;
 byte rowPins[ROWS] = {PA15, PB3, PB4, PB5};
 byte colPins[COLS] = {PB6, PB7, PB8, PB9};
 
+#define USER_PROGRAM_START 0x08005000
+#define FLASH_START_LAST_PAGE 0x0801FC00
+
 #if enable_bi_led
 #define BILED(x) x
 #else
@@ -53,3 +60,8 @@ byte colPins[COLS] = {PB6, PB7, PB8, PB9};
 #endif
 
 static_assert(PSKTIMEOUT > PSKTIMEOUT_WARNING);
+
+#define xstr(s) str(s)
+#define str(s) #s
+const char psk[] = psk_ xstr(end_psk);
+const char psk_end_char = xstr(end_psk)[0];
