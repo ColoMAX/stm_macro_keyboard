@@ -4,6 +4,11 @@ Casing just plain PLA and 4 M2 bolts.
 Glued some large nuts on the inside to weigth down 
 and some hotglue on the bolts to make it less slippery.
 
+--building--
+
+The macro definitions can be given during the build-process via a cli. Or it can be done via the header file in source.
+For the latter the last line of the platformio.ini files needs to be commented out. 
+
 --operation--
 
 settings can be found in `macros_example.hpp`and I recommend changing the timings to your liking.

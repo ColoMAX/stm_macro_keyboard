@@ -8,9 +8,12 @@ when device is unlocked.   */
 
 // TODO add encription to the macros
 
+
 // DO NOT ALTER
 const byte ROWS = 4;
 const byte COLS = 4;
+#define xstr(s) str(s)
+#define str(s) #s
 
 // setting this to false after flashed once with true, will not disable
 //      the read protection!
@@ -25,11 +28,20 @@ const char hexaKeys[ROWS][COLS] = {{'1', '2', '3', 'A'},
                                    {'7', '8', '9', 'C'},
                                    {'*', '0', '#', 'D'}};
 
-// put your macro's in here
+#ifndef USE_SCRIPT_MACROS
+// example of macros. For sacurity, the build script includes an interface
+// to type in the macro's during buildtime, instead of having it in the source.
 const char* maps[ROWS][COLS] = {{"1", "2\n", "3", "4"},
-                                {"cmake3 ..\n", "5", "6", "B"},
+                                {"cmake3 ..\n", "hallo Peter", "6", "B"},
                                 {"7", "8", "9", "C"},
                                 {"*", "0", "#", "D"}};
+#else
+const char* maps[4][4] = {
+    {xstr(MACRO_1_NAME), xstr(MACRO_2_NAME), xstr(MACRO_3_NAME), xstr(MACRO_A_NAME)},
+    {xstr(MACRO_4_NAME), xstr(MACRO_5_NAME), xstr(MACRO_6_NAME), xstr(MACRO_B_NAME)},
+    {xstr(MACRO_7_NAME), xstr(MACRO_8_NAME), xstr(MACRO_9_NAME), xstr(MACRO_C_NAME)},
+    {xstr(MACRO_S_NAME), xstr(MACRO_0_NAME), xstr(MACRO_H_NAME), xstr(MACRO_D_NAME)}};
+#endif
 
 #define psk_ "1234"                           // pincode
 #define end_psk *                             // apply password char
@@ -38,7 +50,7 @@ const unsigned long psk_lockout_time = 3000;  // 3 * 3600;
 const int psk_wipe_count = 2;  // number of lockouts untill flash wipe.
 
 const unsigned long PSKTIMEOUT = 10 * 1000;  //* 60;  // ms:  10 min
-const unsigned long PSKTIMEOUT_WARNING = PSKTIMEOUT * 0.8;
+const unsigned long PSKTIMEOUT_WARNING = PSKTIMEOUT * 0.5;
 const unsigned long BLINK_PERIOD = 500;  // ms: 500 ms
 const uint DEBOUCE_TIME = 10;            // ms
 
@@ -61,7 +73,6 @@ byte colPins[COLS] = {PB6, PB7, PB8, PB9};
 
 static_assert(PSKTIMEOUT > PSKTIMEOUT_WARNING);
 
-#define xstr(s) str(s)
-#define str(s) #s
+
 const char psk[] = psk_ xstr(end_psk);
 const char psk_end_char = xstr(end_psk)[0];
