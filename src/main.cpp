@@ -19,8 +19,9 @@
   bootloader mode, which will be exited after 1 second. One will need to dfu
   drivers (maple) to flash via usb.
 
-  The macros will be saved in PLAIN TEXT in the memory of the STM, thus no
-  protection from firmware reads!
+  The macros will be saved in PLAIN TEXT in the memory of the STM, but the
+  device can be put in write-only mode. Unfortuanntly there are known
+  vulnerabilitys.
 
   You'll have to put in a pincode after connecting the device to a computer, and
   after 10 minuies of inactivity as a safety precaution.
@@ -29,6 +30,13 @@
   be enhanced by using an encryption method for the macros and pincode. Another
   mothod is that the pincode IS the key to the encryption of the macros.
   Optimization can be applyied on how the keys are being registerd.
+
+  Major improvement would be to create a global FSM.
+  Also mutiple pages/tabs could be incorporated of macros by
+   for example holding down a macro key, you go to a new page/mode
+  with different macros mappings. Or by utilizing the four
+  rightsize buttons as page select buttons.
+  Thus creating 256 or 36 macros buttons instead of 16.
 
 */
 
@@ -44,17 +52,16 @@
 
 #include <macros_example.hpp>
 
-#undef expr
+#define expr 0
 
-// experimental eeprom. 
+// experimental eeprom.
 // does show weird behaviour, so disabled.
 #if expr
 #include "eewl.h"
+#else
 #endif
 
-
-Keypad customKeypad =
-    Keypad(makeKeymap(hexaKeys), rowPins, colPins, ROWS, COLS);
+Keypad keypadObj = Keypad(makeKeymap(hexaKeys), rowPins, colPins, ROWS, COLS);
 
 CircularBuffer<char, sizeof(psk) - 1> buffer;
 
@@ -70,11 +77,10 @@ volatile bool disable_timeout = false;
 struct data_saved {
   int count;
   int count_last;
-} cs = {0,0};
-
-EEWL pC(cs, FLASH_PAGE_SIZE/sizeof(cs), 0);
-
+} cs = {0, 0};
+EEWL pC(cs, FLASH_PAGE_SIZE / sizeof(cs), 0););
 #endif
+
 enum led_on { repeat, none, red, green, orange };
 enum green_blink_state { green_start_blink, green_end_blink, green_stable };
 
@@ -89,9 +95,9 @@ void blinker_handler(bool initialized);
 
 void setup() {
   if (READ_PROTECTION) enable_flash_read_protection();
-  #if expr
+#if expr
   EEPROM.begin();
-  #endif
+#endif
 
   lastSeen = millis();
   Keyboard.begin();
@@ -100,15 +106,16 @@ void setup() {
   BILED(pinMode(PIN_ANODE_RED, OUTPUT));
   BILED(pinMode(PIN_ANODE_GREEN, OUTPUT));
 
-  customKeypad.setDebounceTime(DEBOUCE_TIME);
-  customKeypad.addEventListener(keypadEvent);
+  keypadObj.setDebounceTime(DEBOUCE_TIME);
+  keypadObj.addEventListener(keypadEvent);
 }
 
 void loop() {
-  customKeypad.getKeys();  // needed for eventListener,  ;(
+  keypadObj.getKeys();  // needed for eventListener,  ;(
   if (disable_timeout) lastSeen = millis();
 
-  if (!disable_timeout && initialized && PSKTIMEOUT && (millis() - lastSeen) >= PSKTIMEOUT) {
+  if (!disable_timeout && initialized && PSKTIMEOUT &&
+      (millis() - lastSeen) >= PSKTIMEOUT) {
     initialized = false;
     buffer.clear();
     // led_driver(red);
@@ -190,19 +197,21 @@ void led_driver(led_on which) {
     digitalWrite(PIN_LED_BUILTIN, HIGH);
     lastColor = green;
     break;
-    case none:
-      BILED(digitalWrite(PIN_ANODE_RED, LOW));
-      BILED(digitalWrite(PIN_ANODE_GREEN, LOW));
-      digitalWrite(PIN_LED_BUILTIN, HIGH);
-      lastColor = none;
-      break;
-    case orange:
-      if (lastColor == green) {
-        goto red_driver;
-      } else {
-        goto green_driver;
-      }
-      break;
+  none_driver:
+  case none:
+    BILED(digitalWrite(PIN_ANODE_RED, LOW));
+    BILED(digitalWrite(PIN_ANODE_GREEN, LOW));
+    digitalWrite(PIN_LED_BUILTIN, HIGH);
+    lastColor = none;
+    break;
+  orange_driver:
+  case orange:
+    if (lastColor == green) {
+      goto red_driver;
+    } else {
+      goto green_driver;
+    }
+    break;
     default:
       // dont care, should not be possible
       break;
@@ -244,21 +253,21 @@ void psk_handle(KeypadEvent key) {
       led_driver(green);
       initialized = true;
       psk_false_count_last = psk_false_count = 0;
-      #if expr
+#if expr
       cs.count = psk_false_count;
       pC.put(cs);
-      #endif
+#endif
     } else {
-      #if expr
+#if expr
       pC.get(cs);
       psk_false_count = cs.count;
-      #endif
-      
+#endif
+
       psk_false_count++;
-      #if expr
-      cs.count=psk_false_count;
+#if expr
+      cs.count = psk_false_count;
       pC.put(cs);
-      #endif
+#endif
       if (psk_false_count > 0 && psk_false_count % psk_lockout_max == 0) {
         if (psk_false_count % psk_wipe_count == 0) {
           system_wipe();
@@ -284,7 +293,7 @@ void keypadEvent(KeypadEvent key) {
   // TODO clean by use of fsm
   static bool switched_mode = false;
 
-  switch (customKeypad.getState()) {
+  switch (keypadObj.getState()) {
     case IDLE:
       break;
     case PRESSED:
@@ -317,20 +326,20 @@ void keypadEvent(KeypadEvent key) {
             switched_mode = true;
           }
           break;
-        case 'D':  
-          if(!initialized | !numlock_litteral){
-          // reset and enter bootloader.
-          HAL_NVIC_SystemReset();
-          }else{
+        case 'D':
+          if (!initialized | !numlock_litteral) {
+            // reset and enter bootloader.
+            HAL_NVIC_SystemReset();
+          } else {
             switched_mode = true;
             disable_timeout = !disable_timeout;
             led_on color = disable_timeout ? green : red;
             unsigned long now = millis();
-            //block
-            while ((millis() -now)<500) {
+            // block
+            while ((millis() - now) < 500) {
               yield();
               led_driver(color);
-              }
+            }
           }
           break;
         case '*':  // logout
@@ -350,7 +359,8 @@ void keypadEvent(KeypadEvent key) {
 void logout_warning(unsigned long* last_seen_minor, led_on color) {
   static green_blink_state gstate = green_start_blink;
   // almost out of time?
-  if (PSKTIMEOUT && (millis() - lastSeen) < PSKTIMEOUT_WARNING || disable_timeout) {
+  if (PSKTIMEOUT && (millis() - lastSeen) < PSKTIMEOUT_WARNING ||
+      disable_timeout) {
     // nah
     led_driver(color);
   } else {
@@ -368,7 +378,7 @@ void logout_warning(unsigned long* last_seen_minor, led_on color) {
         gstate = green_stable;
         break;
       case green_stable:
-      led_driver(color);
+        led_driver(color);
         if ((millis() - *last_seen_minor) >= 900) {
           gstate = green_start_blink;
           *last_seen_minor = millis();
@@ -386,12 +396,12 @@ bool false_handle() {
   unsigned long current_time = millis();
   static unsigned long last_seen_minor = current_time;
 
-  //led_driver(orange);
+  // led_driver(orange);
   switch (state) {
     case first:
       last_seen_minor = current_time;
       state = start_orange;
-      //led_driver(orange);
+      // led_driver(orange);
       // active = true;
       break;
     case start_orange:
@@ -432,8 +442,7 @@ void blinker_handler(bool initialized) {
     long_pause
   } state = long_pause;
   if (initialized) {
-
-      logout_warning(&last_seen_minor, numlock_litteral?orange:green );
+    logout_warning(&last_seen_minor, numlock_litteral ? orange : green);
     state = first_blink;
 
   } else {
