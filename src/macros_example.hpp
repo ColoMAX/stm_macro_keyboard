@@ -41,9 +41,9 @@ const char hexaKeys[ROWS][COLS] = {{'1', '2', '3', 'A'},
 // to type in the macro's during buildtime, instead of having it in the source.
 const char* maps[ROWS][COLS] = {
     {"1", "2\n", "3", "MyPassworD12"},
-    {"cmake3 ..\n", "hallo Peter", "6", "B"},
-    {"7", "ssh usr@127.0.0.1 -p 3000\n", "9",
-     "sudo apt-get update -y && sudo apt-get upgrade -y\nSudoPSK\n"},
+    {"cmake3 ..\n", "echo\n", "beep", "B"},
+    {"7", "cowsay hi\n", "xclock\n",
+     "sudo apt-get update -y && sudo apt-get upgrade -y\n"},
     {"*", "0", "#",
      "ssh -L 3000:login.server.nl:22"
      "usr@login.nl\n"}};

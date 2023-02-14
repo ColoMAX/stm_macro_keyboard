@@ -12,7 +12,7 @@
   other hurdles.
     - On option to use Serial (over USB) is not supported by this core in
   combination with HID. This could be added manually.
-    - Option to tranfer data by stats-led's of numlock and capslock is not
+    - Option to transfer data by stats-led's of numlock and capslock is not
     supported by the ST-keyboard library. This could be added manually.
 
   Change the macros in the header, hold D to reset the device to go into
@@ -20,16 +20,16 @@
   drivers (maple) to flash via usb.
 
   The macros will be saved in PLAIN TEXT in the memory of the STM, but the
-  device can be put in write-only mode. Unfortuanntly there are known
-  vulnerabilitys.
+  device can be put in write-only mode. Unfortunately there are known
+  vulnerability's.
 
   You'll have to put in a pincode after connecting the device to a computer, and
-  after 10 minuies of inactivity as a safety precaution.
+  after 10 minutes of inactivity as a safety precaution.
 
-  The code can be optimized further, aswell as be made more secure. Security can
-  be enhanced by using an encryption method for the macros and pincode. Another
-  mothod is that the pincode IS the key to the encryption of the macros.
-  Optimization can be applyied on how the keys are being registerd.
+  The code can be optimized further, as well as be made more secure. Security
+  can be enhanced by using an encryption method for the macros and pincode.
+  Another method is that the pincode IS the key to the encryption of the macros.
+  Optimization can be applied on how the keys are being registered.
 
   Major improvement would be to create a global FSM.
   Also mutiple pages/tabs could be incorporated of macros by
@@ -47,8 +47,8 @@
 #include <stm32f1xx_hal_cortex.h>
 
 // not used yet
-//#include "mbedtls/config.h"
-//#include <mbedtls/blowfish.h>
+// #include "mbedtls/config.h"
+// #include <mbedtls/blowfish.h>
 
 #include <macros_example.hpp>
 
@@ -237,7 +237,7 @@ void print_macro(KeypadEvent key) {
 
 /**
  * @brief Check updated pincode, set initialized if correct, and light up led.
- * Pincode is a circulair buffer.
+ * Pincode is a circular buffer.
  * @param key Registered key on numpad. (char)
  */
 void psk_handle(KeypadEvent key) {
@@ -352,7 +352,7 @@ void keypadEvent(KeypadEvent key) {
 }
 
 /**
- * @brief Handle initilized -macro mode green led functions.
+ * @brief Handle initialized -macro mode green led functions.
  *
  * @param last_seen_minor last led change time (ms)
  */
